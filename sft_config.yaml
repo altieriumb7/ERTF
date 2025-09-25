@@ -1,0 +1,20 @@
+model_name_or_path: "meta-llama/Llama-2-7b"
+tokenizer_name: "meta-llama/Llama-2-7b"
+train_dataset: "data/maths_train.jsonl"
+val_dataset: "data/maths_val.jsonl"
+role_embed_dim: 128
+role_names: ["Solver","Verifier"]
+batch_tokens_per_gpu: 256
+grad_accum_steps: 2
+learning_rate: 2e-4
+weight_decay: 0.01
+warmup_steps: 100
+num_train_epochs: 1
+max_grad_norm: 1.0
+gen:
+  temperature: 0.8
+  top_p: 0.95
+  max_new_tokens: 128
+output_dir: "outputs/erft_sft"
+use_bf16: true
+use_4bit: true

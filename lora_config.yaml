@@ -1,0 +1,24 @@
+base_model: "meta-llama/Llama-2-7b"
+load_in_4bit: true
+bnb_4bit_compute_dtype: "bfloat16"
+bnb_4bit_use_double_quant: true
+lora:
+  r: 8
+  alpha: 32
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+role_adapter:
+  enabled: true
+  role_dim: 128
+training_defaults:
+  batch_tokens_per_gpu: 256
+  grad_accum_steps: 2
+  learning_rate: 2e-4
+  weight_decay: 0.01
+  warmup_steps: 100
+  max_epochs: 1
+  fp16: true

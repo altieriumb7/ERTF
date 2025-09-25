@@ -1,0 +1,13 @@
+torch
+transformers>=4.30
+accelerate
+bitsandbytes
+peft
+trl
+datasets
+sympy
+sentence-transformers
+faiss-cpu
+wandb
+ruamel.yaml
+huggingface_hub
