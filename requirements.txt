@@ -1,12 +1,7 @@
-cd ~/ERTF           # repo root
-cp requirements.txt requirements.txt.bak
-
-cat > requirements.txt <<'REQ'
-# Minimal pinned environment tuned for ERTF pipeline (adjust torch for your CUDA if needed)
 torch>=2.0.1
 transformers==4.31.0
 
-# RL / accelerator / PEFT / BNB
+# RL / accelerator / PEFT / bitsandbytes
 accelerate>=1.4.0
 trl==0.22.2
 peft==0.5.0
@@ -24,12 +19,9 @@ huggingface_hub==0.17.1
 ruamel.yaml==0.17.21
 psutil
 
-# Safety/compat
+# Safety/compat with compiled extensions
 numpy<2
 
 # Extras
 safetensors
 tokenizers
-REQ
-
-echo "Wrote new requirements.txt (backup at requirements.txt.bak)"
