@@ -18,7 +18,8 @@ faiss-cpu==1.7.4
 
 # Logging & tooling
 wandb==0.15.12
-huggingface_hub==0.17.1
+# huggingface_hub must satisfy transformers>=4.55 and sentence-transformers
+huggingface_hub>=0.34.0,<1.0
 ruamel.yaml==0.17.21
 psutil
 
