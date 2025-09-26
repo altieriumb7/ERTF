@@ -3,7 +3,7 @@ transformers==4.31.0
 accelerate==0.22.0
 bitsandbytes==0.40.0
 peft==0.5.0
-trl==0.5.7
+trl==0.22.2
 datasets==2.13.0
 sympy==1.12
 sentence-transformers==2.2.2
