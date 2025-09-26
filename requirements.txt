@@ -1,20 +1,24 @@
-# Core ML libs
-torch>=2.0.1          # keep flexible; must match your CUDA (already installed in your venv)
+cd ~/ERTF           # repo root
+cp requirements.txt requirements.txt.bak
+
+cat > requirements.txt <<'REQ'
+# Minimal pinned environment tuned for ERTF pipeline (adjust torch for your CUDA if needed)
+torch>=2.0.1
 transformers==4.31.0
 
-# Accelerator & RL tooling
+# RL / accelerator / PEFT / BNB
 accelerate>=1.4.0
 trl==0.22.2
 peft==0.5.0
 bitsandbytes==0.40.2
 
-# Data + eval + utils
-datasets==2.13.0
+# Datasets / evaluation / numeric parsing
+datasets>=3.0.0
 sympy==1.12
 sentence-transformers==2.2.2
 faiss-cpu==1.7.4
 
-# Logging / helpers
+# Logging & tooling
 wandb==0.15.12
 huggingface_hub==0.17.1
 ruamel.yaml==0.17.21
@@ -23,6 +27,9 @@ psutil
 # Safety/compat
 numpy<2
 
-# Optional / extras (kept unpinned)
+# Extras
 safetensors
 tokenizers
+REQ
+
+echo "Wrote new requirements.txt (backup at requirements.txt.bak)"
