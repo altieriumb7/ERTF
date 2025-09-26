@@ -1,5 +1,8 @@
+# Core ML libs (torch must match your CUDA wheel already installed)
 torch>=2.0.1
-transformers==4.31.0
+
+# transformers must be >=4.55 for trl 0.22.2
+transformers>=4.55.0,<5.0
 
 # RL / accelerator / PEFT / bitsandbytes
 accelerate>=1.4.0
