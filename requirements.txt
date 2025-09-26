@@ -1,14 +1,28 @@
-torch==2.0.1
+# Core ML libs
+torch>=2.0.1          # keep flexible; must match your CUDA (already installed in your venv)
 transformers==4.31.0
-accelerate==0.21.0
-bitsandbytes==0.40.2
+
+# Accelerator & RL tooling
+accelerate>=1.4.0
+trl==0.22.2
 peft==0.5.0
-trl==0.4.7
+bitsandbytes==0.40.2
+
+# Data + eval + utils
 datasets==2.13.0
 sympy==1.12
 sentence-transformers==2.2.2
 faiss-cpu==1.7.4
+
+# Logging / helpers
 wandb==0.15.12
-ruamel.yaml==0.17.21
 huggingface_hub==0.17.1
+ruamel.yaml==0.17.21
 psutil
+
+# Safety/compat
+numpy<2
+
+# Optional / extras (kept unpinned)
+safetensors
+tokenizers
