@@ -1,4 +1,7 @@
-
+cp src/sandbox/agent_loop.py src/sandbox/agent_loop.py.bak 2>/dev/null || true
+cat > src/sandbox/agent_loop.py <<'PY'
+#!/usr/bin/env python
+# coding: utf-8
 import os, json, argparse, torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
@@ -72,6 +75,7 @@ def run_demo(problems, model_name, adapters, out_jsonl, max_rounds, max_new_toke
     }
     os.makedirs(os.path.dirname(out_jsonl), exist_ok=True)
 
+    # STABLE defaults (greedy). Sampling only if --sample is passed.
     gen_kwargs = dict(
         max_new_tokens=max_new_tokens,
         do_sample=False,
@@ -83,7 +87,19 @@ def run_demo(problems, model_name, adapters, out_jsonl, max_rounds, max_new_toke
     if use_sampling:
         gen_kwargs.update(dict(do_sample=True, temperature=0.7, top_p=0.9))
 
-    MAX_PROMPT_TOKENS = 3500  # keep prompt well under 4096 - max_new_tokens
+    # keep prompt well below ctx window; with 256 new tokens, 3200 is very safe
+    MAX_PROMPT_TOKENS = 3200
+
+    def safe_generate(model_key, prompt_text):
+        # truncate prompt hard
+        inputs = tok(prompt_text, return_tensors="pt", truncation=True, max_length=MAX_PROMPT_TOKENS)
+        inputs = {k: v.to(models[model_key].device) for k, v in inputs.items()}
+        try:
+            return models[model_key].generate(**inputs, **gen_kwargs)
+        except RuntimeError:
+            # fallback to strict greedy to avoid sampler math
+            safe = dict(gen_kwargs, do_sample=False, temperature=None, top_p=None)
+            return models[model_key].generate(**inputs, **safe)
 
     with open(out_jsonl, "a", encoding="utf-8") as fout:
         for prob in problems:
@@ -94,13 +110,7 @@ def run_demo(problems, model_name, adapters, out_jsonl, max_rounds, max_new_toke
             for _ in range(max_rounds):
                 # SOLVER
                 p = build_prompt("solver", prob, convo)
-                inputs = tok(p, return_tensors="pt", truncation=True, max_length=MAX_PROMPT_TOKENS)
-                inputs = {k: v.to(models["solver"].device) for k, v in inputs.items()}
-                try:
-                    out = models["solver"].generate(**inputs, **gen_kwargs)
-                except RuntimeError:
-                    safe = dict(gen_kwargs, do_sample=False, temperature=None, top_p=None)
-                    out = models["solver"].generate(**inputs, **safe)
+                out = safe_generate("solver", p)
                 stext = tok.decode(out[0], skip_special_tokens=True)
                 convo.append(("solver", stext))
                 log["turns"].append({"role": "solver", "text": stext})
@@ -110,26 +120,14 @@ def run_demo(problems, model_name, adapters, out_jsonl, max_rounds, max_new_toke
 
                 # VERIFIER
                 p = build_prompt("verifier", prob, convo)
-                inputs = tok(p, return_tensors="pt", truncation=True, max_length=MAX_PROMPT_TOKENS)
-                inputs = {k: v.to(models["verifier"].device) for k, v in inputs.items()}
-                try:
-                    out = models["verifier"].generate(**inputs, **gen_kwargs)
-                except RuntimeError:
-                    safe = dict(gen_kwargs, do_sample=False, temperature=None, top_p=None)
-                    out = models["verifier"].generate(**inputs, **safe)
+                out = safe_generate("verifier", p)
                 vtext = tok.decode(out[0], skip_special_tokens=True)
                 convo.append(("verifier", vtext))
                 log["turns"].append({"role": "verifier", "text": vtext})
 
                 # STRATEGIST
                 p = build_prompt("strategist", prob, convo)
-                inputs = tok(p, return_tensors="pt", truncation=True, max_length=MAX_PROMPT_TOKENS)
-                inputs = {k: v.to(models["strategist"].device) for k, v in inputs.items()}
-                try:
-                    out = models["strategist"].generate(**inputs, **gen_kwargs)
-                except RuntimeError:
-                    safe = dict(gen_kwargs, do_sample=False, temperature=None, top_p=None)
-                    out = models["strategist"].generate(**inputs, **safe)
+                out = safe_generate("strategist", p)
                 ttext = tok.decode(out[0], skip_special_tokens=True)
                 convo.append(("strategist", ttext))
                 log["turns"].append({"role": "strategist", "text": ttext})
@@ -150,3 +148,4 @@ if __name__ == "__main__":
         "A rectangle has sides 3 and 5. What is its area?",
     ]
     run_demo(PROBLEMS, args.model_name_or_path, adapters, args.out_jsonl, args.max_rounds, args.max_new_tokens, use_sampling=args.sample)
+PY
