@@ -1,54 +1,115 @@
-#!/usr/bin/env python3
-# Minimal SFT finetune script using QLoRA+LoRA (small scale for smoke testing).
-import os, json, argparse
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from datasets import load_dataset
+#!/usr/bin/env python
+# coding: utf-8
+
+"""
+train_sft.py — Supervised fine-tuning for role-specific adapters.
+Patched to support Llama-2-7B with Hugging Face + bitsandbytes (4-bit).
+"""
+
+import os
+import argparse
 import torch
-from tqdm import tqdm
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    TrainingArguments,
+    Trainer,
+    BitsAndBytesConfig,
+)
+from datasets import load_dataset
+from peft import LoraConfig, get_peft_model
 
-def read_jsonl(path):
-    with open(path, 'r') as f:
-        return [json.loads(l) for l in f]
 
-def make_prompt(prob):
-    return f"[ROLE: Solver]\nProblem: {prob}\nInstruction: Provide numbered steps.\n1) "
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--model_name_or_path", type=str,
+                   default="meta-llama/Llama-2-7b-hf",
+                   help="Base model path or HF hub id")
+    p.add_argument("--data", type=str, required=True,
+                   help="Path to JSONL dataset with prompt/target fields")
+    p.add_argument("--output_dir", type=str, default="adapters/agent_solver")
+    p.add_argument("--role", type=str, default="solver")
+    p.add_argument("--per_device_train_batch_size", type=int, default=1)
+    p.add_argument("--gradient_accumulation_steps", type=int, default=16)
+    p.add_argument("--num_train_epochs", type=int, default=3)
+    p.add_argument("--learning_rate", type=float, default=2e-4)
+    return p.parse_args()
+
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='sft_config.yaml')
-    parser.add_argument('--lora_config', default='lora_config.yaml')
-    args = parser.parse_args()
-    # load small dataset
-    train = read_jsonl('data/maths_train.jsonl')
-    val = read_jsonl('data/maths_val.jsonl')
-    # load tokenizer and model (small test: use a tiny model if you don't have 7b)
-    model_name = 'meta-llama/Llama-2-7b'
-    print('Loading tokenizer and model (may require bitsandbytes)...')
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(model_name, load_in_4bit=True, device_map='auto')
-    model = prepare_model_for_kbit_training(model)
-    lora_cfg = LoraConfig(r=8, lora_alpha=32, target_modules=['q_proj','v_proj'], lora_dropout=0.05, task_type='CAUSAL_LM')
-    model = get_peft_model(model, lora_cfg)
-    model.train()
-    # Very small "training" loop: do 1 epoch over training data, teacher forcing
-    optim = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=2e-4)
-    for ex in tqdm(train):
-        prompt = make_prompt(ex['problem'])
-        target = ex['answer']
-        inputs = tokenizer(prompt + target, return_tensors='pt', truncation=True).to(model.device)
-        labels = inputs['input_ids'].clone()
-        outputs = model(**inputs, labels=labels)
-        loss = outputs.loss
-        loss.backward()
-        optim.step()
-        optim.zero_grad()
-    # save adapters
-    save_dir = 'outputs/erft_sft_test'
-    os.makedirs(save_dir, exist_ok=True)
-    model.save_pretrained(save_dir)
-    tokenizer.save_pretrained(save_dir)
-    print('Saved test adapters to', save_dir)
+    args = parse_args()
 
-if __name__ == '__main__':
+    # ---- BitsAndBytes quantization for Llama2 ----
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+
+    # ---- Load tokenizer ----
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name_or_path,
+        use_fast=False,
+    )
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # ---- Load base model in 4-bit ----
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name_or_path,
+        quantization_config=bnb_config,
+        device_map="auto",
+    )
+
+    # ---- Add LoRA adapter ----
+    lora_config = LoraConfig(
+        r=64,
+        lora_alpha=16,
+        target_modules=["q_proj", "v_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+
+    # ---- Load dataset ----
+    dataset = load_dataset("json", data_files=args.data, split="train")
+
+    def preprocess(ex):
+        return tokenizer(
+            ex["prompt"],
+            text_target=ex["target"],
+            truncation=True,
+            max_length=512,
+        )
+
+    tokenized = dataset.map(preprocess, remove_columns=dataset.column_names)
+
+    # ---- Training args ----
+    training_args = TrainingArguments(
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        num_train_epochs=args.num_train_epochs,
+        learning_rate=args.learning_rate,
+        logging_steps=10,
+        output_dir=args.output_dir,
+        save_total_limit=2,
+        bf16=torch.cuda.is_available(),
+        optim="paged_adamw_32bit",
+        report_to="none",
+    )
+
+    # ---- Trainer ----
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized,
+    )
+
+    trainer.train()
+    trainer.save_model(args.output_dir)
+
+
+if __name__ == "__main__":
     main()
