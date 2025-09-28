@@ -21,6 +21,13 @@ def load_model(model_name):
     if tok.pad_token_id is None: tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=bnb, device_map="auto")
     model.eval()
+    # after tokenizer/model creation
+    tok.padding_side = "left"  # safer for causal LMs
+    if tok.pad_token_id is None:
+        tok.pad_token = tok.eos_token
+    model.config.pad_token_id = tok.pad_token_id
+    model.config.eos_token_id = tok.eos_token_id
+
     return tok, model
 
 def wrap_with_adapter(base_model, adapter_dir):
