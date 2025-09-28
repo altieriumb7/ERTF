@@ -1,7 +1,4 @@
-cp src/sandbox/agent_loop.py src/sandbox/agent_loop.py.bak 2>/dev/null || true
-cat > src/sandbox/agent_loop.py <<'PY'
-#!/usr/bin/env python
-# coding: utf-8
+
 import os, json, argparse, torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
@@ -148,4 +145,3 @@ if __name__ == "__main__":
         "A rectangle has sides 3 and 5. What is its area?",
     ]
     run_demo(PROBLEMS, args.model_name_or_path, adapters, args.out_jsonl, args.max_rounds, args.max_new_tokens, use_sampling=args.sample)
-PY
