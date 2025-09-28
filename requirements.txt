@@ -1,31 +1,21 @@
-# Core ML libs (torch must match your CUDA wheel already installed)
-torch>=2.0.1
+transformers==4.42.4
+accelerate==0.33.0
+datasets==2.20.0
+tokenizers==0.19.1
+huggingface_hub==0.23.5
 
-# transformers must be >=4.55 for trl 0.22.2
-transformers>=4.55.0,<5.0
+# 4-bit quantization / QLoRA stack
+bitsandbytes==0.43.1
+peft==0.12.0
+trl==0.9.6
+safetensors==0.4.3
 
-# RL / accelerator / PEFT / bitsandbytes
-accelerate>=1.4.0
-trl==0.22.2
-peft==0.5.0
-bitsandbytes==0.40.2
+# Llama/SentencePiece tokenizer + math/verifier utils
+sentencepiece==0.2.0
+sympy==1.13.1
+einops==0.8.0
 
-# Datasets / evaluation / numeric parsing
-datasets>=3.0.0
-sympy==1.12
-sentence-transformers==2.2.2
-faiss-cpu==1.7.4
-
-# Logging & tooling
-wandb==0.15.12
-# huggingface_hub must satisfy transformers>=4.55 and sentence-transformers
-huggingface_hub>=0.34.0,<1.0
-ruamel.yaml==0.17.21
-psutil
-
-# Safety/compat with compiled extensions
-numpy<2
-
-# Extras
-safetensors
-tokenizers
+# General utilities
+numpy==1.26.4
+protobuf==4.25.3
+tqdm==4.66.4
