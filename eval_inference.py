@@ -1,5 +1,5 @@
 # eval_inference.py
-import json, argparse, os, re, torch
+import json, argparse, os, re, torch, time
 from load_adapter_for_inference import load_model_with_adapter
 from verifier_improved import parse_steps_from_text, verifier_pass_fail, check_final_answer_from_text, canonicalize_problem
 
@@ -18,7 +18,6 @@ def majority_vote(samples):
     return samples[0] if samples else ''
 
 def _get_device(module: torch.nn.Module) -> torch.device:
-    # PEFT wrappers don't expose .device; take from first parameter.
     try:
         return next(module.parameters()).device
     except StopIteration:
@@ -30,55 +29,57 @@ def main():
     parser.add_argument('--adapter_dir', default='outputs/erft_sft')
     parser.add_argument('--data', default='data/maths_test.jsonl')
     parser.add_argument('--out', default='results/eval_traces.jsonl')
-    parser.add_argument('--samples', type=int, default=4)
-    parser.add_argument('--max_new_tokens', type=int, default=128)
-    parser.add_argument('--no_4bit', action='store_true',
-                        help='Disable 4-bit loading if set.')
+    parser.add_argument('--samples', type=int, default=1)            # <- start small
+    parser.add_argument('--max_new_tokens', type=int, default=128)   # <- start small
+    parser.add_argument('--limit', type=int, default=3, help='eval only this many items')  # <- new
+    parser.add_argument('--no_4bit', action='store_true')
     args = parser.parse_args()
 
-    # Load base CausalLM + attach LoRA (no value-head here)
-    tokenizer, model = load_model_with_adapter(
-        args.base_model,
-        args.adapter_dir,
-        load_in_4bit=not args.no_4bit
-    )
+    print("Loading model...")
+    tokenizer, model = load_model_with_adapter(args.base_model, args.adapter_dir, load_in_4bit=not args.no_4bit)
+    device = _get_device(model)
+    print("Model device:", device)
 
     data = read_jsonl(args.data)
+    if args.limit is not None:
+        data = data[:args.limit]
     os.makedirs(os.path.dirname(args.out) or '.', exist_ok=True)
 
-    device = _get_device(model)
-    # Ensure pad_token_id is set for generate() with attention_mask padding
     gen_pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+    torch.set_grad_enabled(False)
 
+    t0_all = time.time()
     with open(args.out, 'w', encoding='utf-8') as outfh:
-        for ex in data:
+        for idx, ex in enumerate(data):
+            t0 = time.time()
             prob = canonicalize_problem(ex['problem'])
             prompt = build_prompt(prob)
+            print(f"[{idx+1}/{len(data)}] generating... (len(prompt)={len(prompt)})", flush=True)
 
             samples = []
-            for _ in range(args.samples):
-                inputs = tokenizer(
-                    prompt,
-                    return_tensors='pt',
-                    padding=False
-                )
-                # move to model device
-                inputs = {k: v.to(device) for k, v in inputs.items()}
+            with torch.inference_mode():
+                # autocast to fp16 on GPU
+                amp_ctx = torch.cuda.amp.autocast(dtype=torch.float16) if device.type == "cuda" else nullcontext()
+                from contextlib import nullcontext
+                with amp_ctx:
+                    for s in range(args.samples):
+                        inputs = tokenizer(prompt, return_tensors='pt', padding=False)
+                        inputs = {k: v.to(device) for k, v in inputs.items()}
 
-                out_ids = model.generate(
-                    **inputs,
-                    do_sample=True,
-                    top_p=0.95,
-                    temperature=0.8,
-                    max_new_tokens=args.max_new_tokens,
-                    pad_token_id=gen_pad_id,
-                    eos_token_id=tokenizer.eos_token_id,
-                )[0]
+                        out_ids = model.generate(
+                            **inputs,
+                            do_sample=True,
+                            top_p=0.95,
+                            temperature=0.8,
+                            max_new_tokens=args.max_new_tokens,
+                            pad_token_id=gen_pad_id,
+                            eos_token_id=tokenizer.eos_token_id,
+                            use_cache=True,
+                        )[0]
 
-                # slice to only the newly generated tokens
-                gen_only = out_ids[inputs['input_ids'].shape[-1]:]
-                txt = tokenizer.decode(gen_only, skip_special_tokens=True).strip()
-                samples.append(txt)
+                        gen_only = out_ids[inputs['input_ids'].shape[-1]:]
+                        txt = tokenizer.decode(gen_only, skip_special_tokens=True).strip()
+                        samples.append(txt)
 
             pred = majority_vote(samples)
             steps = parse_steps_from_text(samples[0]) if samples else []
@@ -95,8 +96,9 @@ def main():
                 'sample_0': samples[0] if samples else ""
             }
             outfh.write(json.dumps(record, ensure_ascii=False) + '\n')
+            print(f"  done in {time.time()-t0:.1f}s", flush=True)
 
-    print('Done. Results in', args.out)
+    print(f"All done in {time.time()-t0_all:.1f}s -> {args.out}")
 
 if __name__ == '__main__':
     main()
