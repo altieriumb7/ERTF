@@ -1,21 +1,13 @@
-transformers==4.42.4
-accelerate==0.33.0
-datasets==2.20.0
-tokenizers==0.19.1
-huggingface_hub==0.23.5
-
-# 4-bit quantization / QLoRA stack
+accelerate>=0.33.0
+transformers>=4.44.0
+datasets>=2.20.0
+peft>=0.11.1
 bitsandbytes==0.43.1
-peft==0.12.0
-trl==0.9.6
-safetensors==0.4.3
-
-# Llama/SentencePiece tokenizer + math/verifier utils
-sentencepiece==0.2.0
-sympy==1.13.1
-einops==0.8.0
-
-# General utilities
-numpy==1.26.4
-protobuf==4.25.3
-tqdm==4.66.4
+triton>=2.1.0
+safetensors>=0.4.4
+sentencepiece>=0.1.99
+protobuf>=5.26.1
+einops>=0.8.0
+huggingface_hub>=0.23.5
+evaluate>=0.4.2
+tqdm>=4.66.4
