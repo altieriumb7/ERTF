@@ -92,60 +92,40 @@ def main():
 
     # ---- Data ----
     ds = load_dataset("json", data_files=args.data, split="train")
+def preprocess(ex):
+    # accept {"prompt","target"} or {"prompt","response"} or {"input","target"}
+    prompt = ex.get("prompt", ex.get("input"))
+    target = ex.get("target", ex.get("response"))
+    if prompt is None or target is None:
+        raise KeyError(f"Example missing text fields. Keys: {list(ex.keys())}")
 
-    def preprocess(ex):
-        # Accept multiple schemas
-        src = ex.get("prompt", ex.get("input"))
-        tgt = ex.get("target", ex.get("response"))
-        if src is None or tgt is None:
-            raise KeyError(f"Example missing text fields. Keys present: {list(ex.keys())}")
+    # tokenize without adding extra special tokens
+    prompt_ids = tok(prompt, add_special_tokens=False)["input_ids"]
+    target_ids = tok(target, add_special_tokens=False)["input_ids"]
 
-        # Tokenize separately; collator will pad dynamically
-        model_inputs = tok(src, max_length=args.max_length, truncation=True)
-        with tok.as_target_tokenizer():
-            labels = tok(tgt, max_length=args.max_length, truncation=True)
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
+    # ensure an EOS at the end of the target (helps training stability)
+    if tok.eos_token_id is not None and (len(target_ids) == 0 or target_ids[-1] != tok.eos_token_id):
+        target_ids = target_ids + [tok.eos_token_id]
 
-    tokenized = ds.map(preprocess, remove_columns=ds.column_names)
+    # truncate so total length <= max_length (keep all of target, trim prompt from the left)
+    max_len = args.max_length
+    total_len = len(prompt_ids) + len(target_ids)
+    if total_len > max_len:
+        keep_prompt = max(0, max_len - len(target_ids))
+        prompt_ids = prompt_ids[-keep_prompt:]
+        total_len = len(prompt_ids) + len(target_ids)
+        assert total_len <= max_len
 
-    # ---- Collator (dynamic padding + label masking) ----
-    from transformers import DataCollatorForSeq2Seq
-    data_collator = DataCollatorForSeq2Seq(
-        tokenizer=tok,
-        model=model,
-        padding=True,                 # pad per batch
-        label_pad_token_id=-100,      # ignore pad in loss
-    )
+    input_ids = prompt_ids + target_ids
+    # labels mask: ignore prompt positions, learn on target
+    labels = [-100] * len(prompt_ids) + target_ids
 
-    # ---- Training Args ----
-    optim_name = "paged_adamw_32bit" if _BNB_AVAILABLE else "adamw_torch"
-    training_args = TrainingArguments(
-        output_dir=args.output_dir,
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_train_epochs,
-        learning_rate=args.learning_rate,
-        logging_steps=10,
-        save_total_limit=2,
-        report_to="none",
-        fp16=torch.cuda.is_available(),   # rely on accelerate --mixed_precision for runtime dtype
-        bf16=False,
-        optim=optim_name,
-    )
-
-    # ---- Trainer ----
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=tokenized,
-        data_collator=data_collator,
-        tokenizer=tok,
-    )
-
-    trainer.train()
-    trainer.save_model(args.output_dir)
-
+    attention_mask = [1] * len(input_ids)
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,
+    }
 
 if __name__ == "__main__":
     main()
