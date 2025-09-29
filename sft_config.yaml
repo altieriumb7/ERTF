@@ -1,7 +1,10 @@
 model_name_or_path: "meta-llama/Llama-2-7b"
 tokenizer_name: "meta-llama/Llama-2-7b"
-train_dataset: "data/maths_train.jsonl"
-val_dataset: "data/maths_val.jsonl"
+train_path: "data/gsm8k/train.jsonl"
+val_path:   "data/gsm8k/val.jsonl"
+prompt_key: "prompt"     # = original question text
+response_key: "response" # = original answer/solution text
+
 role_embed_dim: 128
 role_names: ["Solver","Verifier"]
 batch_tokens_per_gpu: 256
