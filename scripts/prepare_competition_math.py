@@ -17,6 +17,11 @@ def extract_sft(example):
         "output": example["solution"].strip(),
     }
 
+def dump_jsonl(path, iterator):
+    with open(path, "w", encoding="utf-8") as f:
+        for ex in iterator:
+            f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hf_path", default="qwedsacf/competition_math")
@@ -34,41 +39,64 @@ def main():
         key = list(ds.keys())[0]
         ds = DatasetDict({"train": ds[key]})
 
-    if SUBJECT_COL in ds["train"].column_names:
-        tmp = ds["train"].train_test_split(test_size=args.test_size, seed=args.seed,
-                                           stratify_by_column=SUBJECT_COL)
+    # --- First split: Train/Test, stratified by SUBJECT_COL if present ---
+    train_ds = ds["train"]
+    if SUBJECT_COL in train_ds.column_names:
+        # convert to ClassLabel so stratify works
+        train_ds = train_ds.class_encode_column(SUBJECT_COL)
+        tmp = train_ds.train_test_split(
+            test_size=args.test_size,
+            seed=args.seed,
+            stratify_by_column=SUBJECT_COL,
+        )
+        # ensure test split keeps same encoded dtype for consistency (optional)
+        test_ds = ds["train"].class_encode_column(SUBJECT_COL)
+        test_idx = tmp["test"].indices if hasattr(tmp["test"], "indices") else None
+        if test_idx is not None:
+            test_ds = test_ds.select(test_idx)
+        else:
+            test_ds = tmp["test"]
     else:
-        tmp = ds["train"].train_test_split(test_size=args.test_size, seed=args.seed)
+        tmp = train_ds.train_test_split(test_size=args.test_size, seed=args.seed)
+        test_ds = tmp["test"]
 
-    if LEVEL_COL in tmp["train"].column_names:
-        tv = tmp["train"].train_test_split(test_size=args.val_size, seed=args.seed,
-                                           stratify_by_column=LEVEL_COL)
+    # --- Second split: from remaining Train, carve Validation stratified by LEVEL_COL if present ---
+    train_rem = tmp["train"]
+    if LEVEL_COL in train_rem.column_names:
+        train_rem = train_rem.class_encode_column(LEVEL_COL)
+        tv = train_rem.train_test_split(
+            test_size=args.val_size,
+            seed=args.seed,
+            stratify_by_column=LEVEL_COL,
+        )
+        train_final = tv["train"]
+        val_final = tv["test"]
     else:
-        tv = tmp["train"].train_test_split(test_size=args.val_size, seed=args.seed)
+        tv = train_rem.train_test_split(test_size=args.val_size, seed=args.seed)
+        train_final = tv["train"]
+        val_final = tv["test"]
 
-    splits = DatasetDict({"train": tv["train"], "validation": tv["test"], "test": tmp["test"]})
+    splits = DatasetDict({"train": train_final, "validation": val_final, "test": test_ds})
 
-    def dump_jsonl(path, iterator):
-        with open(path, "w", encoding="utf-8") as f:
-            for ex in iterator:
-                f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+    # --- Export raw JSONL (problem/solution + optional meta) ---
+    def keep_fields(ex):
+        out = {"problem": ex["problem"], "solution": ex["solution"]}
+        if SUBJECT_COL in ex: out[SUBJECT_COL] = ex[SUBJECT_COL]
+        if LEVEL_COL in ex: out[LEVEL_COL] = ex[LEVEL_COL]
+        return out
 
-    dump_jsonl(os.path.join(args.out_dir, "train_raw.jsonl"),
-               ({k: ex[k] for k in ("problem", "solution", SUBJECT_COL, LEVEL_COL) if k in ex}
-                for ex in splits["train"]))
-    dump_jsonl(os.path.join(args.out_dir, "validation_raw.jsonl"),
-               ({k: ex[k] for k in ("problem", "solution", SUBJECT_COL, LEVEL_COL) if k in ex}
-                for ex in splits["validation"]))
-    dump_jsonl(os.path.join(args.out_dir, "test_raw.jsonl"),
-               ({k: ex[k] for k in ("problem", "solution", SUBJECT_COL, LEVEL_COL) if k in ex}
-                for ex in splits["test"]))
+    dump_jsonl(os.path.join(args.out_dir, "train_raw.jsonl"), (keep_fields(ex) for ex in splits["train"]))
+    dump_jsonl(os.path.join(args.out_dir, "validation_raw.jsonl"), (keep_fields(ex) for ex in splits["validation"]))
+    dump_jsonl(os.path.join(args.out_dir, "test_raw.jsonl"), (keep_fields(ex) for ex in splits["test"]))
 
+    # --- Export SFT JSONL ---
     dump_jsonl(os.path.join(args.out_dir, "train_sft.jsonl"), (extract_sft(ex) for ex in splits["train"]))
     dump_jsonl(os.path.join(args.out_dir, "validation_sft.jsonl"), (extract_sft(ex) for ex in splits["validation"]))
 
+    # --- Tiny preview ---
     preview_path = os.path.join(args.out_dir, "PREVIEW.txt")
     with open(preview_path, "w", encoding="utf-8") as f:
-        for i in range(5):
+        for i in range(min(5, len(splits["train"]))):
             ex = splits["train"][i]
             f.write(f"Problem {i+1}:\n{ex['problem']}\n---\nSolution:\n{ex['solution'][:400]}...\n\n")
 
